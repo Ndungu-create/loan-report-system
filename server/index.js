@@ -121,6 +121,32 @@ function refreshExpiredCodes() {
 }
 
 // ---- Auth routes ----
+
+// One-time admin setup when no admins exist (or SETUP_SECRET provided)
+app.post('/api/setup/admin', loginLimiter, (req, res) => {
+  const count = db.prepare('SELECT COUNT(*) as c FROM admins').get().c;
+  const setupSecret = process.env.SETUP_SECRET || '';
+  const provided = String(req.body.setupSecret || '');
+  if (count > 0 && (!setupSecret || provided !== setupSecret)) {
+    return res.status(403).json({ error: 'Setup locked. Admin already exists.' });
+  }
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  const name = String(req.body.name || 'Administrator').trim();
+  if (!email || password.length < 8) {
+    return res.status(400).json({ error: 'Email and password (min 8 chars) required' });
+  }
+  const hash = bcrypt.hashSync(password, 12);
+  const existing = db.prepare('SELECT id FROM admins WHERE email = ?').get(email);
+  if (existing) {
+    db.prepare('UPDATE admins SET password_hash = ?, name = ? WHERE id = ?').run(hash, name, existing.id);
+  } else {
+    db.prepare('INSERT INTO admins (email, password_hash, name) VALUES (?, ?, ?)').run(email, hash, name);
+  }
+  audit('system', null, 'admin_setup', { email }, req.ip);
+  res.json({ ok: true, message: 'Admin ready. You can log in.' });
+});
+
 app.post('/api/admin/login', loginLimiter, (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
@@ -548,7 +574,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Loan Report System running on http://localhost:${PORT}`);
   console.log(`Admin:  http://localhost:${PORT}/admin/`);
   console.log(`Client: http://localhost:${PORT}/client/`);
