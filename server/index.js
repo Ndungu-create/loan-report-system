@@ -442,9 +442,17 @@ const upload = multer({
   }
 });
 
-app.post('/api/client/uploads', requireClient, upload.single('file'), (req, res) => {
+app.post('/api/client/uploads', requireClient, (req, res, next) => {
+  // multipart or JSON
+  if (req.is('multipart/form-data')) {
+    return upload.single('file')(req, res, next);
+  }
+  next();
+}, (req, res) => {
   try {
-    const meta = JSON.parse(req.body.meta || '{}');
+    const meta = typeof req.body.meta === 'string'
+      ? JSON.parse(req.body.meta || '{}')
+      : (req.body.meta || req.body || {});
     const recordsValid = Number(meta.recordsValid || 0);
     const recordsSkipped = Number(meta.recordsSkipped || 0);
     const recordsTotal = Number(meta.recordsTotal || recordsValid + recordsSkipped);
@@ -489,6 +497,7 @@ app.post('/api/client/uploads', requireClient, upload.single('file'), (req, res)
       uploadId: info.lastInsertRowid,
       isDuplicate: !!isDuplicate,
       duplicateOf,
+      metaOnly: !req.file,
       message: isDuplicate
         ? 'Processed, but flagged as possible duplicate of an earlier upload (excluded from combined totals).'
         : 'Upload recorded'
@@ -566,8 +575,10 @@ setInterval(cleanupExpiredFiles, 60 * 60 * 1000);
 app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin')));
 app.use('/client', express.static(path.join(__dirname, '..', 'public', 'client')));
 app.use('/shared', express.static(path.join(__dirname, '..', 'public', 'shared')));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/', (req, res) => res.redirect('/client/'));
 app.get('/admin', (req, res) => res.redirect('/admin/'));
+app.get('/setup', (req, res) => res.redirect('/setup.html'));
 
 app.use((err, req, res, next) => {
   console.error(err);
