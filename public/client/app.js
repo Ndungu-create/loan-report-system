@@ -11,16 +11,58 @@ let selectedDay = null;
 let lastFile = null;
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    credentials: 'include',
-    headers: opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
-    ...opts,
-    body: opts.body instanceof FormData || typeof opts.body === 'string' ? opts.body
-      : opts.body ? JSON.stringify(opts.body) : undefined
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs || 90000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, {
+      credentials: 'include',
+      signal: controller.signal,
+      headers: opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
+      ...opts,
+      body: opts.body instanceof FormData || typeof opts.body === 'string' ? opts.body
+        : opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText || ('HTTP ' + res.status));
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Request timed out — server may be waking up. Wait 30s and try again.');
+    if (e.message === 'Failed to fetch') throw new Error('Cannot reach server (sleeping or network). Open the site, wait 40s, then upload again.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function wakeServer() {
+  try {
+    await api('/api/client/me', { timeoutMs: 60000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function registerUpload(file, meta) {
+  // try with file first
+  try {
+    const fd = new FormData();
+    if (file) fd.append('file', file);
+    fd.append('meta', JSON.stringify(meta));
+    return await api('/api/client/uploads', { method: 'POST', body: fd, timeoutMs: 120000 });
+  } catch (e1) {
+    // fallback: log totals only (no file) so admin still sees the amount
+    try {
+      return await api('/api/client/uploads', {
+        method: 'POST',
+        body: { ...meta, metaOnly: true },
+        timeoutMs: 90000
+      });
+    } catch (e2) {
+      throw e1;
+    }
+  }
 }
 
 function status(msg, ok) {
@@ -303,29 +345,40 @@ async function handleFile(file) {
   rebuildReport();
   $('#resultsPanel').classList.remove('hidden');
 
-  // register upload with server (file + totals)
-  try {
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('meta', JSON.stringify({
-      recordsValid: summary.records,
-      recordsSkipped: summary.skipped,
-      recordsTotal: summary.records + summary.skipped,
-      totalAmount: summary.totalAmount,
-      reportDay: selectedDay,
-      contentHash,
-      originalFilename: file.name,
-      fileSize: file.size
-    }));
-    const reg = await api('/api/client/uploads', { method: 'POST', body: fd });
-    status(
-      '✓ ' + summary.records + ' records · total ' + money(summary.totalAmount) +
-      (reg.isDuplicate ? ' · flagged as possible duplicate (not double-counted in admin totals)' : ''),
-      true
-    );
-    await refreshMe();
-  } catch (e) {
-    status('Processed locally but server log failed: ' + e.message, false);
+  // register upload with server (wake + retry)
+  const meta = {
+    recordsValid: summary.records,
+    recordsSkipped: summary.skipped,
+    recordsTotal: summary.records + summary.skipped,
+    totalAmount: summary.totalAmount,
+    reportDay: selectedDay,
+    contentHash,
+    originalFilename: file.name,
+    fileSize: file.size
+  };
+  status('Connecting to server…', true);
+  await wakeServer();
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      status('Saving to server (try ' + attempt + '/3)…', true);
+      const reg = await registerUpload(file, meta);
+      status(
+        '✓ ' + summary.records + ' records · total ' + money(summary.totalAmount) +
+        (reg.isDuplicate ? ' · flagged as possible duplicate (not double-counted in admin totals)' : '') +
+        (reg.metaOnly ? ' · totals saved (file not stored)' : ''),
+        true
+      );
+      await refreshMe();
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 4000 * attempt));
+    }
+  }
+  if (lastErr) {
+    status('Report ready on this device. Server log failed: ' + lastErr.message, false);
   }
 }
 
