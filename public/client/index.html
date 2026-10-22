@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Report — Client</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <link rel="stylesheet" href="/shared/styles.css" />
+  <style>
+    .drop{border:2px dashed #5f6368;border-radius:12px;padding:28px;text-align:center;cursor:pointer;margin-bottom:12px}
+    .drop:hover{border-color:#fff;background:#1a1f26}
+    .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:12px 0;border-bottom:1px solid #2a2f36}
+    .tab{background:none;border:none;color:#9aa0a6;padding:8px 12px;cursor:pointer;font-weight:600}
+    .tab.active{color:#fff;border-bottom:2px solid #fff}
+    .num{text-align:right}
+  </style>
+</head>
+<body class="dark">
+  <div id="loginView" class="center-card">
+    <h1>Client access</h1>
+    <p class="muted">Enter your 4-character access code</p>
+    <div id="loginErr" class="alert hidden"></div>
+    <label>Access code</label>
+    <input id="codeInput" maxlength="4" placeholder="e.g. A7K2" style="text-transform:uppercase;letter-spacing:.2em;font-size:1.3rem;text-align:center" />
+    <button class="btn primary" id="loginBtn">Continue</button>
+  </div>
+
+  <div id="appView" class="hidden" style="max-width:1000px;margin:0 auto;padding:20px 14px 40px">
+    <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:1.35rem">Daily Report</h1>
+        <p class="muted" id="clientMeta"></p>
+      </div>
+      <button class="btn outline" id="logoutBtn">Logout</button>
+    </header>
+
+    <div class="cards" id="clientCards"></div>
+    <div id="status" class="alert hidden"></div>
+
+    <div class="panel">
+      <h3>1. Upload disbursement export</h3>
+      <div class="drop" id="dropzone"><strong>Click or drop</strong> daily export .xlsx</div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" hidden />
+      <h3 style="margin-top:16px">2. Name map (optional)</h3>
+      <div class="drop" id="namesDrop" style="padding:16px"><strong>FIND / REPLACE</strong> names .xlsx</div>
+      <input type="file" id="namesInput" accept=".xlsx,.xls" hidden />
+      <p class="muted" id="mapBadge">No name map loaded</p>
+    </div>
+
+    <div class="panel hidden" id="resultsPanel">
+      <div class="form-row">
+        <div><label>Report day</label><select id="daySelect"></select></div>
+      </div>
+      <div class="cards" id="resultStats"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+        <button class="btn primary" id="dlReport">Download Daily Report</button>
+        <button class="btn outline" id="dlClean">Download Cleaned Data</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-t="report">Daily Report</button>
+        <button class="tab" data-t="branch">Per Branch</button>
+        <button class="tab" data-t="na">N/A Officers</button>
+        <button class="tab" data-t="preview">Preview</button>
+      </div>
+      <div class="table-wrap" id="tableHost"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Your recent uploads</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>When</th><th>File</th><th>Amount</th><th>Records</th><th>Day</th><th></th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table></div>
+    </div>
+  </div>
+  <script src="/client/app.js"></script>
+</body>
+</html>

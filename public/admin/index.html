@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Loan Report System</title>
+  <link rel="stylesheet" href="/shared/styles.css" />
+</head>
+<body class="dark">
+  <div id="loginView" class="center-card">
+    <h1>Admin Login</h1>
+    <p class="muted">Loan Disbursement Cleaner — control panel</p>
+    <div id="loginErr" class="alert hidden"></div>
+    <label>Email</label>
+    <input type="email" id="email" autocomplete="username" />
+    <label>Password</label>
+    <input type="password" id="password" autocomplete="current-password" />
+    <button class="btn primary" id="loginBtn">Sign in</button>
+  </div>
+
+  <div id="appView" class="hidden">
+    <aside class="sidebar">
+      <div class="brand">Admin Panel</div>
+      <nav>
+        <button data-page="dashboard" class="nav active">Dashboard</button>
+        <button data-page="codes" class="nav">Access codes</button>
+        <button data-page="clients" class="nav">Clients</button>
+        <button data-page="uploads" class="nav">Uploads</button>
+        <button data-page="activity" class="nav">Activity</button>
+        <button data-page="finance" class="nav">Finance</button>
+      </nav>
+      <button class="btn outline block" id="logoutBtn">Sign out</button>
+    </aside>
+    <main class="main">
+      <header class="top">
+        <h2 id="pageTitle">Dashboard</h2>
+        <span id="adminName" class="muted"></span>
+      </header>
+
+      <section id="page-dashboard" class="page">
+        <div class="cards" id="dashCards"></div>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Recent uploads</h3>
+            <div class="table-wrap"><table><thead><tr><th>When</th><th>Client</th><th>File</th><th>Amount</th><th>Records</th></tr></thead><tbody id="recentUploads"></tbody></table></div>
+          </div>
+          <div class="panel">
+            <h3>Recent activity</h3>
+            <div class="table-wrap"><table><thead><tr><th>When</th><th>Action</th><th>Detail</th></tr></thead><tbody id="recentAudit"></tbody></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-codes" class="page hidden">
+        <div class="panel">
+          <h3>Create access code</h3>
+          <div class="form-row">
+            <div><label>Client name</label><input id="codeClientName" /></div>
+            <div><label>Branch</label><input id="codeBranch" /></div>
+            <div>
+              <label>Duration</label>
+              <select id="codeDuration">
+                <option value="24">1 day</option>
+                <option value="72">3 days</option>
+                <option value="168">7 days</option>
+                <option value="336">14 days</option>
+                <option value="720" selected>30 days</option>
+                <option value="custom">Custom hours…</option>
+              </select>
+            </div>
+            <div id="customHoursWrap" class="hidden"><label>Hours</label><input type="number" id="customHours" min="1" value="48" /></div>
+            <div><label>Manual code (optional)</label><input id="manualCode" maxlength="4" placeholder="Auto" style="text-transform:uppercase" /></div>
+          </div>
+          <button class="btn primary" id="createCodeBtn">Generate / create code</button>
+          <div id="codeMsg" class="alert hidden"></div>
+        </div>
+        <div class="panel">
+          <h3>All codes</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Code</th><th>Client</th><th>Branch</th><th>Status</th><th>Expires</th><th>Uploads</th><th>Amount</th><th>Actions</th></tr></thead>
+            <tbody id="codesBody"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <section id="page-clients" class="page hidden">
+        <div class="panel">
+          <h3>Register client</h3>
+          <div class="form-row">
+            <div><label>Name</label><input id="clientName" /></div>
+            <div><label>Branch</label><input id="clientBranch" /></div>
+            <div><label>Notes</label><input id="clientNotes" /></div>
+          </div>
+          <button class="btn primary" id="addClientBtn">Add client</button>
+        </div>
+        <div class="panel">
+          <h3>Clients</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Name</th><th>Branch</th><th>Uploads</th><th>Total amount</th><th>Last login</th></tr></thead>
+            <tbody id="clientsBody"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <section id="page-uploads" class="page hidden">
+        <div class="panel">
+          <h3>Uploaded files</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>When</th><th>Client</th><th>File</th><th>Size</th><th>Records</th><th>Amount</th><th>Dup?</th><th></th></tr></thead>
+            <tbody id="uploadsBody"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <section id="page-activity" class="page hidden">
+        <div class="panel">
+          <h3>Clients online <span class="muted" id="onlineHint"></span></h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Code</th><th>Client</th><th>Branch</th><th>Login</th><th>Last seen</th><th>Expires</th></tr></thead>
+            <tbody id="onlineBody"></tbody>
+          </table></div>
+        </div>
+        <div class="panel">
+          <h3>Security events</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>When</th><th>Action</th><th>Detail</th><th>IP</th></tr></thead>
+            <tbody id="failedBody"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <section id="page-finance" class="page hidden">
+        <div class="grid-2">
+          <div class="panel"><h3>By client</h3><div class="table-wrap"><table><thead><tr><th>Client</th><th>Branch</th><th>Uploads</th><th>Amount</th></tr></thead><tbody id="finClient"></tbody></table></div></div>
+          <div class="panel"><h3>By branch</h3><div class="table-wrap"><table><thead><tr><th>Branch</th><th>Uploads</th><th>Amount</th></tr></thead><tbody id="finBranch"></tbody></table></div></div>
+        </div>
+        <div class="panel"><h3>By day</h3><div class="table-wrap"><table><thead><tr><th>Day</th><th>Uploads</th><th>Amount</th><th>Records</th></tr></thead><tbody id="finDay"></tbody></table></div></div>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/app.js"></script>
+</body>
+</html>
