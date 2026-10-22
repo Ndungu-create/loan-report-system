@@ -276,7 +276,14 @@ $('#loginBtn').onclick = async () => {
     $('#loginView').classList.add('hidden');
     $('#appView').classList.remove('hidden');
     await refreshMe();
-    setInterval(() => api('/api/client/heartbeat', { method: 'POST' }).catch(() => {}), 30000);
+    setInterval(async () => {
+      try {
+        await api('/api/client/heartbeat', { method: 'POST' });
+      } catch (e) {
+        status('Access suspended or expired. Logging out…', false);
+        setTimeout(() => location.reload(), 1500);
+      }
+    }, 15000);
   } catch (e) {
     $('#loginErr').textContent = e.message;
     $('#loginErr').className = 'alert err';
@@ -327,6 +334,14 @@ async function sha256(buf) {
 
 async function handleFile(file) {
   if (typeof XLSX === 'undefined') { status('SheetJS failed to load', false); return; }
+  // Block if code suspended / revoked / revoked
+  try {
+    await api('/api/client/me');
+  } catch (e) {
+    status('Access denied: ' + (e.message || 'code not active') + '. Processing blocked.', false);
+    setTimeout(() => location.reload(), 2000);
+    return;
+  }
   status('Processing ' + file.name + '…');
   lastFile = file;
   const ab = await file.arrayBuffer();
@@ -426,5 +441,12 @@ api('/api/client/me').then(async () => {
   $('#loginView').classList.add('hidden');
   $('#appView').classList.remove('hidden');
   await refreshMe();
-  setInterval(() => api('/api/client/heartbeat', { method: 'POST' }).catch(() => {}), 30000);
+  setInterval(async () => {
+      try {
+        await api('/api/client/heartbeat', { method: 'POST' });
+      } catch (e) {
+        status('Access suspended or expired. Logging out…', false);
+        setTimeout(() => location.reload(), 1500);
+      }
+    }, 15000);
 }).catch(() => {});
