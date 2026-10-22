@@ -273,6 +273,7 @@ $('#namesInput').onchange = () => {
       if (a && b) { nameMap[normalizeKey(a)] = b.toUpperCase(); n++; }
     }
     $('#mapBadge').textContent = n + ' name replacements loaded';
+    $('#mapBadge').className = 'badge on';
   };
   reader.readAsArrayBuffer(f);
 };
