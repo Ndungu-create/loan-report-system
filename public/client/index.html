@@ -6,57 +6,290 @@
   <title>Daily Report — Client</title>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="/shared/styles.css" />
   <style>
-    .drop{border:2px dashed #5f6368;border-radius:12px;padding:28px;text-align:center;cursor:pointer;margin-bottom:12px}
-    .drop:hover{border-color:#fff;background:#1a1f26}
-    .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:12px 0;border-bottom:1px solid #2a2f36}
-    .tab{background:none;border:none;color:#9aa0a6;padding:8px 12px;cursor:pointer;font-weight:600}
-    .tab.active{color:#fff;border-bottom:2px solid #fff}
-    .num{text-align:right}
+    :root {
+      --bg: #0a0c0f;
+      --surface: #12151a;
+      --surface2: #1a1f27;
+      --border: #2a303a;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #ffffff;
+      --ok: #81c995;
+      --err: #f28b82;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .hidden { display: none !important; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+
+    /* Login */
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        radial-gradient(ellipse at 20% 20%, #1a2030 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, #151a22 0%, transparent 45%),
+        var(--bg);
+    }
+    .login-card {
+      width: 100%;
+      max-width: 400px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.45);
+    }
+    .login-card .logo {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: #fff; color: #000;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 1.1rem; margin-bottom: 18px;
+    }
+    .login-card h1 { font-size: 1.45rem; margin-bottom: 6px; }
+    .login-card label { display: block; font-size: 0.8rem; color: var(--muted); margin: 16px 0 6px; }
+    .login-card input {
+      width: 100%; padding: 14px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; color: #fff;
+      font-size: 1.35rem; text-align: center;
+      letter-spacing: 0.35em; text-transform: uppercase;
+      font-weight: 700;
+    }
+    .login-card input:focus { outline: 2px solid #fff; outline-offset: 1px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 11px 18px; border-radius: 10px; font-weight: 650; font-size: 0.92rem;
+      cursor: pointer; border: none; transition: .15s;
+    }
+    .btn-primary { background: #fff; color: #000; }
+    .btn-primary:hover { background: #e8e8e8; }
+    .btn-outline { background: transparent; color: #fff; border: 1.5px solid var(--border); }
+    .btn-outline:hover { border-color: #fff; background: var(--surface2); }
+    .btn-block { width: 100%; margin-top: 18px; padding: 14px; }
+    .alert {
+      margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+      font-size: 0.88rem; border: 1px solid var(--border);
+    }
+    .alert.err { border-color: #5c2b2b; color: var(--err); background: #1a1010; }
+    .alert.ok { border-color: #2b5c3a; color: var(--ok); background: #0f1a12; }
+
+    /* App shell */
+    .shell { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 16px; flex-wrap: wrap;
+      padding-bottom: 18px; margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar h1 { font-size: 1.4rem; font-weight: 700; }
+    .topbar .meta { margin-top: 4px; color: var(--muted); font-size: 0.88rem; max-width: 640px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 640px) { .stats { grid-template-columns: 1fr; } }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 14px;
+    }
+    .stat .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .stat .value { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .section-head h2 {
+      font-size: 1rem; font-weight: 700;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .step {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: #fff; color: #000; font-size: 0.8rem; font-weight: 800;
+    }
+    .section-head .hint { font-size: 0.82rem; color: var(--muted); }
+
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 720px) { .upload-grid { grid-template-columns: 1fr; } }
+
+    .drop {
+      border: 2px dashed #3c4450;
+      border-radius: 12px;
+      padding: 28px 18px;
+      text-align: center;
+      cursor: pointer;
+      background: var(--bg);
+      transition: .15s;
+      min-height: 130px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    }
+    .drop:hover, .drop.dragover { border-color: #fff; background: var(--surface2); }
+    .drop .icon { font-size: 1.8rem; opacity: .9; }
+    .drop strong { color: #fff; }
+    .drop span { color: var(--muted); font-size: 0.85rem; }
+    .drop.small { min-height: 110px; padding: 20px 14px; }
+    .badge {
+      display: inline-block; margin-top: 10px;
+      padding: 5px 12px; border-radius: 20px;
+      border: 1px solid var(--border); font-size: 0.8rem; color: var(--muted);
+    }
+    .badge.on { color: var(--ok); border-color: #2b5c3a; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 12px;
+      align-items: flex-end; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .field label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
+    .field select {
+      padding: 9px 12px; border-radius: 8px;
+      background: var(--bg); color: #fff; border: 1px solid var(--border);
+      font-weight: 600; min-width: 160px;
+    }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .tabs {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+      margin: 8px 0 12px;
+    }
+    .tab {
+      background: none; border: none; color: var(--muted);
+      padding: 10px 14px; cursor: pointer; font-weight: 650; font-size: 0.88rem;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .tab.active { color: #fff; border-bottom-color: #fff; }
+    .tab:hover { color: #fff; }
+
+    .table-wrap {
+      overflow: auto; max-height: 480px;
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--bg);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th {
+      text-align: left; padding: 10px 12px;
+      background: var(--surface2); color: var(--muted);
+      font-weight: 650; position: sticky; top: 0; z-index: 1;
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #1e232b; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .center { text-align: center; }
+
+    #status {
+      margin-bottom: 16px;
+    }
+    footer {
+      text-align: center; color: var(--muted);
+      font-size: 0.78rem; margin-top: 28px;
+    }
   </style>
 </head>
-<body class="dark">
-  <div id="loginView" class="center-card">
-    <h1>Client access</h1>
-    <p class="muted">Enter your 4-character access code</p>
-    <div id="loginErr" class="alert hidden"></div>
-    <label>Access code</label>
-    <input id="codeInput" maxlength="4" placeholder="e.g. A7K2" style="text-transform:uppercase;letter-spacing:.2em;font-size:1.3rem;text-align:center" />
-    <button class="btn primary" id="loginBtn">Continue</button>
+<body>
+  <!-- LOGIN -->
+  <div id="loginView" class="login-wrap">
+    <div class="login-card">
+      <div class="logo">DR</div>
+      <h1>Daily Report</h1>
+      <p class="muted">Enter your 4-character access code to continue</p>
+      <div id="loginErr" class="alert err hidden"></div>
+      <label for="codeInput">Access code</label>
+      <input id="codeInput" maxlength="4" placeholder="A7K2" autocomplete="off" />
+      <button class="btn btn-primary btn-block" id="loginBtn">Continue</button>
+    </div>
   </div>
 
-  <div id="appView" class="hidden" style="max-width:1000px;margin:0 auto;padding:20px 14px 40px">
-    <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+  <!-- APP -->
+  <div id="appView" class="shell hidden">
+    <header class="topbar">
       <div>
-        <h1 style="font-size:1.35rem">Daily Report</h1>
-        <p class="muted" id="clientMeta"></p>
+        <h1>Daily Report</h1>
+        <p class="meta" id="clientMeta">—</p>
       </div>
-      <button class="btn outline" id="logoutBtn">Logout</button>
+      <button class="btn btn-outline" id="logoutBtn">Log out</button>
     </header>
 
-    <div class="cards" id="clientCards"></div>
+    <div class="stats" id="clientCards"></div>
     <div id="status" class="alert hidden"></div>
 
-    <div class="panel">
-      <h3>1. Upload disbursement export</h3>
-      <div class="drop" id="dropzone"><strong>Click or drop</strong> daily export .xlsx</div>
-      <input type="file" id="fileInput" accept=".xlsx,.xls" hidden />
-      <h3 style="margin-top:16px">2. Name map (optional)</h3>
-      <div class="drop" id="namesDrop" style="padding:16px"><strong>FIND / REPLACE</strong> names .xlsx</div>
-      <input type="file" id="namesInput" accept=".xlsx,.xls" hidden />
-      <p class="muted" id="mapBadge">No name map loaded</p>
-    </div>
+    <!-- Upload -->
+    <section class="section">
+      <div class="section-head">
+        <h2><span class="step">1</span> Upload files</h2>
+        <span class="hint">Disbursement export required · name map optional</span>
+      </div>
+      <div class="upload-grid">
+        <div>
+          <div class="drop" id="dropzone">
+            <div class="icon">📄</div>
+            <strong>Daily export (.xlsx)</strong>
+            <span>Click or drop your disbursement file</span>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls" hidden />
+        </div>
+        <div>
+          <div class="drop small" id="namesDrop">
+            <div class="icon">🔤</div>
+            <strong>Name map (optional)</strong>
+            <span>FIND / REPLACE spreadsheet</span>
+          </div>
+          <input type="file" id="namesInput" accept=".xlsx,.xls" hidden />
+          <div id="mapBadge" class="badge">No name map loaded</div>
+        </div>
+      </div>
+    </section>
 
-    <div class="panel hidden" id="resultsPanel">
-      <div class="form-row">
-        <div><label>Report day</label><select id="daySelect"></select></div>
+    <!-- Results -->
+    <section class="section hidden" id="resultsPanel">
+      <div class="section-head">
+        <h2><span class="step">2</span> Results</h2>
+        <span class="hint">Review, then download</span>
       </div>
-      <div class="cards" id="resultStats"></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-        <button class="btn primary" id="dlReport">Download Daily Report</button>
-        <button class="btn outline" id="dlClean">Download Cleaned Data</button>
+
+      <div class="toolbar">
+        <div class="field">
+          <label for="daySelect">Report day</label>
+          <select id="daySelect"></select>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="dlReport">⬇ Daily Report</button>
+          <button class="btn btn-outline" id="dlClean">⬇ Cleaned data</button>
+        </div>
       </div>
+
+      <div class="stats" id="resultStats" style="margin-bottom:14px"></div>
+
       <div class="tabs">
         <button class="tab active" data-t="report">Daily Report</button>
         <button class="tab" data-t="branch">Per Branch</button>
@@ -64,16 +297,33 @@
         <button class="tab" data-t="preview">Preview</button>
       </div>
       <div class="table-wrap" id="tableHost"></div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h3>Your recent uploads</h3>
-      <div class="table-wrap"><table>
-        <thead><tr><th>When</th><th>File</th><th>Amount</th><th>Records</th><th>Day</th><th></th></tr></thead>
-        <tbody id="historyBody"></tbody>
-      </table></div>
-    </div>
+    <!-- History -->
+    <section class="section">
+      <div class="section-head">
+        <h2><span class="step">3</span> Your recent uploads</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>File</th>
+              <th class="num">Amount</th>
+              <th class="center">Records</th>
+              <th>Day</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>Processed in your browser · Upload totals stored securely for your admin</footer>
   </div>
+
   <script src="/client/app.js"></script>
 </body>
 </html>
