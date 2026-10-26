@@ -1,6 +1,5 @@
 /**
- * Lightweight JSON file store with a better-sqlite3-like prepare API
- * for the queries used by this app. No native modules — works on Render free tier.
+ * JSON file store — robust matching so codes/admins/uploads actually persist on Render.
  */
 const fs = require('fs');
 const path = require('path');
@@ -10,25 +9,45 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const dbPath = process.env.DB_PATH || path.join(dataDir, 'app.json');
 
-const empty = () => ({
-  admins: [],
-  clients: [],
-  access_codes: [],
-  sessions: [],
-  uploads: [],
-  audit_logs: [],
-  _seq: { admins: 0, clients: 0, access_codes: 0, uploads: 0, audit_logs: 0 }
-});
+function empty() {
+  return {
+    admins: [],
+    clients: [],
+    access_codes: [],
+    sessions: [],
+    uploads: [],
+    audit_logs: [],
+    _seq: { admins: 0, clients: 0, access_codes: 0, uploads: 0, audit_logs: 0 }
+  };
+}
 
 function load() {
   try {
-    if (fs.existsSync(dbPath)) return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-  } catch (_) {}
+    if (fs.existsSync(dbPath)) {
+      const raw = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      raw.admins = raw.admins || [];
+      raw.clients = raw.clients || [];
+      raw.access_codes = raw.access_codes || [];
+      raw.sessions = raw.sessions || [];
+      raw.uploads = raw.uploads || [];
+      raw.audit_logs = raw.audit_logs || [];
+      raw._seq = raw._seq || { admins: 0, clients: 0, access_codes: 0, uploads: 0, audit_logs: 0 };
+      return raw;
+    }
+  } catch (e) {
+    console.error('DB load error', e.message);
+  }
   return empty();
 }
 
 function save(state) {
-  fs.writeFileSync(dbPath, JSON.stringify(state, null, 0));
+  try {
+    const tmp = dbPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, dbPath);
+  } catch (e) {
+    console.error('DB save error', e.message);
+  }
 }
 
 let state = load();
@@ -42,132 +61,179 @@ function nextId(table) {
   return state._seq[table];
 }
 
-function matchWhere(row, where, params) {
-  // very small subset: equality on named columns from SQL we generate
-  return true;
+function norm(sql) {
+  return String(sql || '').replace(/\s+/g, ' ').trim();
 }
 
-/** Minimal SQL executor for the statements this app uses */
-function execQuery(sql, params = []) {
-  const s = sql.replace(/\s+/g, ' ').trim();
-  const p = params.slice();
+function byId(arr, id) {
+  const n = Number(id);
+  return arr.find((x) => Number(x.id) === n);
+}
 
-  // SELECT COUNT(*) as c FROM admins
-  if (/^SELECT COUNT\(\*\) as c FROM admins$/i.test(s)) {
+function execQuery(sql, params = []) {
+  const s = norm(sql);
+  const p = params.slice();
+  const low = s.toLowerCase();
+
+  // ----- ADMINS -----
+  if (low === 'select count(*) as c from admins') {
     return { rows: [{ c: state.admins.length }] };
   }
-
-  // SELECT * FROM admins WHERE email = ?
-  if (/^SELECT \* FROM admins WHERE email = \?$/i.test(s)) {
-    const email = p[0];
+  if (low.startsWith('select * from admins where email =')) {
+    const email = String(p[0] || '').toLowerCase();
     const row = state.admins.find((a) => a.email === email) || null;
     return { rows: row ? [row] : [] };
   }
-
-  // SELECT id, email, name FROM admins WHERE id = ?
-  if (/^SELECT id, email, name FROM admins WHERE id = \?$/i.test(s)) {
-    const row = state.admins.find((a) => a.id === p[0]) || null;
+  if (low.startsWith('select id, email, name from admins where id =')) {
+    const row = byId(state.admins, p[0]);
     return { rows: row ? [{ id: row.id, email: row.email, name: row.name }] : [] };
   }
-
-  // INSERT INTO admins
-  if (/^INSERT INTO admins \(email, password_hash, name\) VALUES \(\?, \?, \?\)$/i.test(s)) {
+  if (low.startsWith('insert into admins')) {
     const id = nextId('admins');
-    state.admins.push({ id, email: p[0], password_hash: p[1], name: p[2], created_at: nowISO() });
+    state.admins.push({ id, email: String(p[0]).toLowerCase(), password_hash: p[1], name: p[2], created_at: nowISO() });
     save(state);
     return { lastInsertRowid: id, changes: 1 };
   }
-
-  // UPDATE admins SET password_hash = ?, name = ? WHERE id = ?
-  if (/^UPDATE admins SET password_hash = \?, name = \? WHERE id = \?$/i.test(s)) {
-    const a = state.admins.find((x) => x.id === p[2]);
+  if (low.startsWith('update admins set password_hash')) {
+    const a = byId(state.admins, p[2]);
     if (a) { a.password_hash = p[0]; a.name = p[1]; save(state); return { changes: 1 }; }
     return { changes: 0 };
   }
 
-  // INSERT clients
-  if (/^INSERT INTO clients \(name, branch, notes\) VALUES \(\?, \?, \?\)$/i.test(s)) {
+  // ----- CLIENTS -----
+  if (low.startsWith('insert into clients')) {
     const id = nextId('clients');
-    state.clients.push({ id, name: p[0], branch: p[1], notes: p[2], created_at: nowISO(), updated_at: nowISO() });
-    save(state);
-    return { lastInsertRowid: id, changes: 1 };
-  }
-  if (/^INSERT INTO clients \(name, branch\) VALUES \(\?, \?\)$/i.test(s)) {
-    const id = nextId('clients');
-    state.clients.push({ id, name: p[0], branch: p[1], notes: null, created_at: nowISO(), updated_at: nowISO() });
-    save(state);
-    return { lastInsertRowid: id, changes: 1 };
-  }
-
-  // access_codes insert
-  if (/^INSERT INTO access_codes \(code, client_id, client_name, branch, status, duration_hours, created_by\) VALUES \(\?, \?, \?, \?, 'unused', \?, \?\)$/i.test(s)) {
-    const id = nextId('access_codes');
-    state.access_codes.push({
-      id, code: p[0], client_id: p[1], client_name: p[2], branch: p[3],
-      status: 'unused', duration_hours: p[4], created_by: p[5],
-      created_at: nowISO(), activated_at: null, expires_at: null, revoked_at: null,
-      last_login_at: null, last_activity_at: null, failed_attempts: 0, locked_until: null
+    state.clients.push({
+      id, name: p[0], branch: p[1] || null, notes: p[2] || null,
+      created_at: nowISO(), updated_at: nowISO()
     });
     save(state);
     return { lastInsertRowid: id, changes: 1 };
   }
+  if (low === 'select count(*) as c from clients') {
+    return { rows: [{ c: state.clients.length }] };
+  }
+  if (low.includes('from clients c order by')) {
+    const rows = state.clients.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).map((c) => {
+      const ups = state.uploads.filter((u) => Number(u.client_id) === Number(c.id) && !u.deleted_at && !u.is_duplicate);
+      const codes = state.access_codes.filter((ac) => Number(ac.client_id) === Number(c.id));
+      const lastLogin = codes.map((x) => x.last_login_at).filter(Boolean).sort().reverse()[0] || null;
+      return {
+        ...c,
+        upload_count: ups.length,
+        total_amount: ups.reduce((s, u) => s + (u.total_amount || 0), 0),
+        last_login_at: lastLogin
+      };
+    });
+    return { rows };
+  }
 
-  // SELECT access code by code
-  if (/^SELECT \* FROM access_codes WHERE code = \?$/i.test(s)) {
-    const row = state.access_codes.find((c) => c.code === p[0]) || null;
+  // ----- ACCESS CODES -----
+  if (low.startsWith('insert into access_codes')) {
+    const id = nextId('access_codes');
+    const row = {
+      id,
+      code: String(p[0] || '').toUpperCase(),
+      client_id: p[1],
+      client_name: p[2],
+      branch: p[3] || null,
+      status: 'unused',
+      duration_hours: Number(p[4] || 24),
+      created_by: p[5],
+      created_at: nowISO(),
+      activated_at: null,
+      expires_at: null,
+      revoked_at: null,
+      last_login_at: null,
+      last_activity_at: null,
+      failed_attempts: 0,
+      locked_until: null
+    };
+    state.access_codes.push(row);
+    save(state);
+    console.log('Code saved:', row.code, 'id=', id);
+    return { lastInsertRowid: id, changes: 1 };
+  }
+  if (low.startsWith('select * from access_codes where code =')) {
+    const code = String(p[0] || '').toUpperCase();
+    const row = state.access_codes.find((c) => String(c.code).toUpperCase() === code) || null;
     return { rows: row ? [row] : [] };
   }
-  if (/^SELECT id FROM access_codes WHERE code = \?$/i.test(s)) {
-    const row = state.access_codes.find((c) => c.code === p[0]);
+  if (low.startsWith('select id from access_codes where code =')) {
+    const code = String(p[0] || '').toUpperCase();
+    const row = state.access_codes.find((c) => String(c.code).toUpperCase() === code);
     return { rows: row ? [{ id: row.id }] : [] };
   }
-  if (/^SELECT \* FROM access_codes WHERE id = \?$/i.test(s)) {
-    const row = state.access_codes.find((c) => c.id === p[0]) || null;
+  if (low.startsWith('select * from access_codes where id =')) {
+    const row = byId(state.access_codes, p[0]);
     return { rows: row ? [row] : [] };
   }
-
-  // UPDATE access_codes various
-  if (s.startsWith('UPDATE access_codes')) {
+  if (low.includes('from access_codes ac order by')) {
+    const rows = state.access_codes.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).map((ac) => {
+      const ups = state.uploads.filter((u) => Number(u.access_code_id) === Number(ac.id) && !u.deleted_at);
+      const upsOk = ups.filter((u) => !u.is_duplicate);
+      return {
+        ...ac,
+        upload_count: ups.length,
+        total_amount: upsOk.reduce((s, u) => s + (u.total_amount || 0), 0)
+      };
+    });
+    return { rows };
+  }
+  if (low.includes("from access_codes where status = 'active'")) {
+    return { rows: [{ c: state.access_codes.filter((c) => c.status === 'active').length }] };
+  }
+  if (low.includes('from access_codes where status in')) {
+    return { rows: [{ c: state.access_codes.filter((c) => ['expired', 'revoked', 'suspended'].includes(c.status)).length }] };
+  }
+  if (low.startsWith('update access_codes')) {
+    // bulk expire
+    if (low.includes('where status =') && low.includes('expired')) {
+      let n = 0;
+      const now = Date.now();
+      state.access_codes.forEach((x) => {
+        if (x.status === 'active' && x.expires_at && new Date(x.expires_at).getTime() < now) {
+          x.status = 'expired'; n++;
+        }
+      });
+      save(state);
+      return { changes: n };
+    }
     const id = p[p.length - 1];
-    const c = state.access_codes.find((x) => x.id === id);
-    if (!c) return { changes: 0 };
-    if (s.includes("status = 'expired'")) {
-      // bulk or single
-      if (s.includes('WHERE status =')) {
-        let n = 0;
-        const now = Date.now();
-        state.access_codes.forEach((x) => {
-          if (x.status === 'active' && x.expires_at && new Date(x.expires_at).getTime() < now) {
-            x.status = 'expired'; n++;
-          }
-        });
-        save(state);
-        return { changes: n };
-      }
-      c.status = 'expired';
+    const c = byId(state.access_codes, id);
+    if (!c) {
+      console.warn('UPDATE code not found id=', id, 'params', p);
+      return { changes: 0 };
     }
-    if (s.includes("status = 'active'") && s.includes('activated_at')) {
-      c.status = 'active'; c.activated_at = p[0]; c.expires_at = p[1];
-      c.last_login_at = nowISO(); c.failed_attempts = 0;
+    if (low.includes("status = 'active'") && low.includes('activated_at')) {
+      c.status = 'active';
+      c.activated_at = p[0];
+      c.expires_at = p[1];
+      c.last_login_at = nowISO();
+      c.failed_attempts = 0;
+    } else if (low.includes('last_login_at') && low.includes('failed_attempts')) {
+      c.last_login_at = nowISO();
+      c.failed_attempts = 0;
     }
-    if (s.includes('last_login_at') && s.includes('failed_attempts = 0') && !s.includes('activated_at')) {
-      c.last_login_at = nowISO(); c.failed_attempts = 0;
+    if (low.includes('last_activity_at')) c.last_activity_at = nowISO();
+    if (low.includes("status = 'expired'") && !low.includes('where status =')) c.status = 'expired';
+    if (low.includes("status = 'revoked'")) { c.status = 'revoked'; c.revoked_at = nowISO(); }
+    if (low.includes("status = 'suspended'")) c.status = 'suspended';
+    if (low.includes('revoked_at = null') || low.includes('revoked_at = null')) {
+      c.status = 'active';
+      c.revoked_at = null;
     }
-    if (s.includes('last_activity_at')) c.last_activity_at = nowISO();
-    if (s.includes("status = 'revoked'")) { c.status = 'revoked'; c.revoked_at = nowISO(); }
-    if (s.includes("status = 'suspended'")) c.status = 'suspended';
-    if (s.includes('revoked_at = NULL')) { c.status = 'active'; c.revoked_at = null; }
-    if (s.includes('expires_at = ?') && s.includes('duration_hours')) {
+    if (low.includes('expires_at = ?') && low.includes('duration_hours')) {
       c.expires_at = p[0];
-      c.duration_hours = (c.duration_hours || 0) + p[1];
+      c.duration_hours = (c.duration_hours || 0) + Number(p[1] || 0);
       if (['expired', 'revoked', 'suspended'].includes(c.status)) c.status = 'active';
     }
     save(state);
     return { changes: 1 };
   }
 
-  // sessions
-  if (/^INSERT INTO sessions \(id, role, admin_id, access_code_id, client_id, expires_at, ip, user_agent\) VALUES \(\?, \?, \?, \?, \?, \?, \?, \?\)$/i.test(s)) {
+  // ----- SESSIONS -----
+  if (low.startsWith('insert into sessions')) {
     state.sessions.push({
       id: p[0], role: p[1], admin_id: p[2], access_code_id: p[3], client_id: p[4],
       created_at: nowISO(), last_seen_at: nowISO(), expires_at: p[5], ip: p[6], user_agent: p[7]
@@ -175,28 +241,49 @@ function execQuery(sql, params = []) {
     save(state);
     return { changes: 1 };
   }
-  if (/^SELECT \* FROM sessions WHERE id = \?$/i.test(s)) {
+  if (low.startsWith('select * from sessions where id =')) {
     const row = state.sessions.find((x) => x.id === p[0]) || null;
     return { rows: row ? [row] : [] };
   }
-  if (/^DELETE FROM sessions WHERE id = \?$/i.test(s)) {
+  if (low.startsWith('delete from sessions where id =')) {
     state.sessions = state.sessions.filter((x) => x.id !== p[0]);
     save(state);
     return { changes: 1 };
   }
-  if (/^DELETE FROM sessions WHERE access_code_id = \?$/i.test(s)) {
-    state.sessions = state.sessions.filter((x) => x.access_code_id !== p[0]);
+  if (low.startsWith('delete from sessions where access_code_id =')) {
+    const aid = Number(p[0]);
+    state.sessions = state.sessions.filter((x) => Number(x.access_code_id) !== aid);
     save(state);
     return { changes: 1 };
   }
-  if (/^UPDATE sessions SET last_seen_at = datetime\('now'\) WHERE id = \?$/i.test(s)) {
+  if (low.startsWith('update sessions set last_seen_at')) {
     const row = state.sessions.find((x) => x.id === p[0]);
     if (row) { row.last_seen_at = nowISO(); save(state); }
     return { changes: 1 };
   }
+  if (low.includes('from sessions') && low.includes("role = 'client'")) {
+    const thresholdSec = 90;
+    const cut = Date.now() - thresholdSec * 1000;
+    const online = state.sessions.filter((sess) => {
+      if (sess.role !== 'client') return false;
+      const t = new Date(String(sess.last_seen_at).replace(' ', 'T') + 'Z').getTime();
+      return t >= cut || new Date(sess.last_seen_at).getTime() >= cut;
+    });
+    if (low.includes('count(distinct access_code_id)')) {
+      return { rows: [{ c: new Set(online.map((x) => x.access_code_id)).size }] };
+    }
+    const rows = online.map((sess) => {
+      const ac = byId(state.access_codes, sess.access_code_id) || {};
+      return {
+        session_id: sess.id, last_seen_at: sess.last_seen_at, login_at: sess.created_at,
+        code: ac.code, client_name: ac.client_name, branch: ac.branch, status: ac.status, expires_at: ac.expires_at
+      };
+    });
+    return { rows };
+  }
 
-  // uploads insert
-  if (s.startsWith('INSERT INTO uploads')) {
+  // ----- UPLOADS -----
+  if (low.startsWith('insert into uploads')) {
     const id = nextId('uploads');
     const row = {
       id,
@@ -211,43 +298,41 @@ function execQuery(sql, params = []) {
     save(state);
     return { lastInsertRowid: id, changes: 1 };
   }
-
-  if (/^SELECT id FROM uploads WHERE content_hash = \? AND access_code_id = \? AND deleted_at IS NULL AND is_duplicate = 0 ORDER BY id ASC LIMIT 1$/i.test(s)) {
-    const row = state.uploads.find((u) => u.content_hash === p[0] && u.access_code_id === p[1] && !u.deleted_at && !u.is_duplicate);
+  if (low.includes('from uploads where content_hash =')) {
+    const row = state.uploads.find((u) =>
+      u.content_hash === p[0] && Number(u.access_code_id) === Number(p[1]) && !u.deleted_at && !u.is_duplicate
+    );
     return { rows: row ? [{ id: row.id }] : [] };
   }
-
-  if (/^SELECT \* FROM uploads WHERE id = \? AND deleted_at IS NULL$/i.test(s) || /^SELECT \* FROM uploads WHERE id = \?$/i.test(s)) {
-    const row = state.uploads.find((u) => u.id === p[0] && (s.includes('deleted_at IS NULL') ? !u.deleted_at : true)) || null;
+  if (low.startsWith('select * from uploads where id =')) {
+    const row = byId(state.uploads, p[0]);
+    if (row && low.includes('deleted_at is null') && row.deleted_at) return { rows: [] };
     return { rows: row ? [row] : [] };
   }
-
-  if (/^UPDATE uploads SET deleted_at = datetime\('now'\) WHERE id = \?$/i.test(s)) {
-    const u = state.uploads.find((x) => x.id === p[0]);
-    if (u) { u.deleted_at = nowISO(); save(state); }
+  if (low.startsWith('update uploads set deleted_at')) {
+    const u = byId(state.uploads, p[0]);
+    if (u) {
+      u.deleted_at = nowISO();
+      if (low.includes('stored_filename = null')) u.stored_filename = null;
+      save(state);
+    }
     return { changes: 1 };
   }
-  if (/^UPDATE uploads SET deleted_at = datetime\('now'\), stored_filename = NULL WHERE id = \?$/i.test(s)) {
-    const u = state.uploads.find((x) => x.id === p[0]);
-    if (u) { u.deleted_at = nowISO(); u.stored_filename = null; save(state); }
-    return { changes: 1 };
+  if (low.includes('from uploads where deleted_at is null order by created_at desc limit 15')) {
+    return { rows: state.uploads.filter((u) => !u.deleted_at).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 15) };
   }
-
-  // audit
-  if (/^INSERT INTO audit_logs \(actor_role, actor_id, action, detail, ip\) VALUES \(\?, \?, \?, \?, \?\)$/i.test(s)) {
-    const id = nextId('audit_logs');
-    state.audit_logs.push({ id, actor_role: p[0], actor_id: p[1], action: p[2], detail: p[3], ip: p[4], created_at: nowISO() });
-    save(state);
-    return { lastInsertRowid: id, changes: 1 };
+  if (low.includes('from uploads where deleted_at is null order by created_at desc limit 500')) {
+    return { rows: state.uploads.filter((u) => !u.deleted_at).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 500) };
   }
-
-  // Dashboard aggregates — handled loosely
-  if (s.includes('FROM uploads WHERE') && s.includes('SUM(total_amount)')) {
+  if (low.includes('from uploads where access_code_id =') && low.includes('limit 20')) {
+    const rows = state.uploads.filter((u) => Number(u.access_code_id) === Number(p[0]) && !u.deleted_at)
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 20);
+    return { rows };
+  }
+  if (low.includes('from uploads where') && low.includes('sum(total_amount)')) {
     let list = state.uploads.filter((u) => !u.deleted_at && !u.is_duplicate);
-    if (s.includes('access_code_id = ?')) list = list.filter((u) => u.access_code_id === p[0]);
-    if (s.includes('client_id = ?')) {
-      const idx = s.includes('access_code_id') ? 1 : 0;
-      // params order varies — best effort
+    if (low.includes('access_code_id = ?')) {
+      list = list.filter((u) => Number(u.access_code_id) === Number(p[0]));
     }
     return {
       rows: [{
@@ -259,97 +344,7 @@ function execQuery(sql, params = []) {
       }]
     };
   }
-
-  if (/^SELECT COUNT\(\*\) as c FROM clients$/i.test(s)) {
-    return { rows: [{ c: state.clients.length }] };
-  }
-  if (/SELECT COUNT\(\*\) as c FROM access_codes WHERE status = 'active'/i.test(s)) {
-    return { rows: [{ c: state.access_codes.filter((c) => c.status === 'active').length }] };
-  }
-  if (/SELECT COUNT\(\*\) as c FROM access_codes WHERE status IN/i.test(s)) {
-    return { rows: [{ c: state.access_codes.filter((c) => ['expired', 'revoked', 'suspended'].includes(c.status)).length }] };
-  }
-
-  // online count
-  if (s.includes('FROM sessions') && s.includes("role = 'client'")) {
-    const thresholdSec = 90;
-    const cut = Date.now() - thresholdSec * 1000;
-    const online = state.sessions.filter((sess) => {
-      if (sess.role !== 'client') return false;
-      return new Date(sess.last_seen_at.replace(' ', 'T') + 'Z').getTime() >= cut
-        || new Date(sess.last_seen_at).getTime() >= cut;
-    });
-    if (s.includes('COUNT(DISTINCT access_code_id)')) {
-      const ids = new Set(online.map((x) => x.access_code_id));
-      return { rows: [{ c: ids.size }] };
-    }
-    // join list for activity
-    const rows = online.map((sess) => {
-      const ac = state.access_codes.find((c) => c.id === sess.access_code_id) || {};
-      return {
-        session_id: sess.id, last_seen_at: sess.last_seen_at, login_at: sess.created_at,
-        code: ac.code, client_name: ac.client_name, branch: ac.branch, status: ac.status, expires_at: ac.expires_at
-      };
-    });
-    return { rows };
-  }
-
-  // list queries
-  if (/FROM uploads WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 15/i.test(s)) {
-    const rows = state.uploads.filter((u) => !u.deleted_at).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 15);
-    return { rows };
-  }
-  if (/FROM uploads WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 500/i.test(s)) {
-    const rows = state.uploads.filter((u) => !u.deleted_at).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 500);
-    return { rows };
-  }
-  if (/FROM uploads WHERE access_code_id = \? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 20/i.test(s)) {
-    const rows = state.uploads.filter((u) => u.access_code_id === p[0] && !u.deleted_at)
-      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 20);
-    return { rows };
-  }
-  if (/SELECT \* FROM audit_logs ORDER BY created_at DESC LIMIT 20/i.test(s)) {
-    return { rows: state.audit_logs.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 20) };
-  }
-  if (/action IN \('code_invalid','admin_login_failed'\)/i.test(s)) {
-    return {
-      rows: state.audit_logs.filter((a) => ['code_invalid', 'admin_login_failed'].includes(a.action))
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 50)
-    };
-  }
-
-  // codes list with subcounts
-  if (s.includes('FROM access_codes ac ORDER BY')) {
-    const rows = state.access_codes.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).map((ac) => {
-      const ups = state.uploads.filter((u) => u.access_code_id === ac.id && !u.deleted_at);
-      const upsOk = ups.filter((u) => !u.is_duplicate);
-      return {
-        ...ac,
-        upload_count: ups.length,
-        total_amount: upsOk.reduce((s, u) => s + (u.total_amount || 0), 0)
-      };
-    });
-    return { rows };
-  }
-
-  // clients list
-  if (s.includes('FROM clients c ORDER BY')) {
-    const rows = state.clients.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).map((c) => {
-      const ups = state.uploads.filter((u) => u.client_id === c.id && !u.deleted_at && !u.is_duplicate);
-      const codes = state.access_codes.filter((ac) => ac.client_id === c.id);
-      const lastLogin = codes.map((x) => x.last_login_at).filter(Boolean).sort().reverse()[0] || null;
-      return {
-        ...c,
-        upload_count: ups.length,
-        total_amount: ups.reduce((s, u) => s + (u.total_amount || 0), 0),
-        last_login_at: lastLogin
-      };
-    });
-    return { rows };
-  }
-
-  // finance group by
-  if (s.includes('GROUP BY client_name')) {
+  if (low.includes('group by client_name')) {
     const map = {};
     state.uploads.filter((u) => !u.deleted_at && !u.is_duplicate).forEach((u) => {
       const k = (u.client_name || '') + '|' + (u.branch || '');
@@ -358,7 +353,7 @@ function execQuery(sql, params = []) {
     });
     return { rows: Object.values(map).sort((a, b) => b.total_amount - a.total_amount) };
   }
-  if (s.includes('GROUP BY branch')) {
+  if (low.includes('group by branch')) {
     const map = {};
     state.uploads.filter((u) => !u.deleted_at && !u.is_duplicate).forEach((u) => {
       const k = u.branch || '(none)';
@@ -367,7 +362,7 @@ function execQuery(sql, params = []) {
     });
     return { rows: Object.values(map).sort((a, b) => b.total_amount - a.total_amount) };
   }
-  if (s.includes("date(created_at) as day") || s.includes('GROUP BY date(created_at)')) {
+  if (low.includes('group by date(created_at)') || low.includes('as day')) {
     const map = {};
     state.uploads.filter((u) => !u.deleted_at && !u.is_duplicate).forEach((u) => {
       const day = String(u.created_at || '').slice(0, 10);
@@ -376,28 +371,33 @@ function execQuery(sql, params = []) {
     });
     return { rows: Object.values(map).sort((a, b) => (a.day < b.day ? 1 : -1)).slice(0, 60) };
   }
-
-  // retention select
-  if (s.includes('retention_until') && s.includes("datetime('now')")) {
+  if (low.includes('retention_until') && low.includes("datetime('now')")) {
     const now = Date.now();
     const rows = state.uploads.filter((u) => !u.deleted_at && u.retention_until && new Date(u.retention_until).getTime() < now)
       .map((u) => ({ id: u.id, stored_filename: u.stored_filename }));
     return { rows };
   }
 
-  // SELECT COUNT/SUM for client me stats
-  if (s.includes('FROM uploads WHERE access_code_id = ?') && s.includes('SUM(total_amount)')) {
-    const list = state.uploads.filter((u) => u.access_code_id === p[0] && !u.deleted_at && !u.is_duplicate);
+  // ----- AUDIT -----
+  if (low.startsWith('insert into audit_logs')) {
+    const id = nextId('audit_logs');
+    state.audit_logs.push({
+      id, actor_role: p[0], actor_id: p[1], action: p[2], detail: p[3], ip: p[4], created_at: nowISO()
+    });
+    save(state);
+    return { lastInsertRowid: id, changes: 1 };
+  }
+  if (low.includes('from audit_logs order by created_at desc limit 20')) {
+    return { rows: state.audit_logs.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 20) };
+  }
+  if (low.includes("action in ('code_invalid'") || low.includes('code_invalid')) {
     return {
-      rows: [{
-        uploads: list.length,
-        total_amount: list.reduce((a, u) => a + (u.total_amount || 0), 0),
-        records: list.reduce((a, u) => a + (u.records_valid || 0), 0)
-      }]
+      rows: state.audit_logs.filter((a) => ['code_invalid', 'admin_login_failed'].includes(a.action))
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 50)
     };
   }
 
-  console.warn('Unhandled SQL:', s, p);
+  console.warn('Unhandled SQL:', s, 'params=', p);
   return { rows: [], lastInsertRowid: 0, changes: 0 };
 }
 
