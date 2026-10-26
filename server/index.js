@@ -585,6 +585,29 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Server error' });
 });
 
+
+// Auto-create / restore admin from environment variables (survives empty DB after sleep)
+function ensureAdminFromEnv() {
+  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || '';
+  const name = (process.env.ADMIN_NAME || 'Administrator').trim();
+  if (!email || password.length < 8) {
+    console.log('ADMIN_EMAIL / ADMIN_PASSWORD not set (or password < 8 chars). Use /admin/setup.html once if needed.');
+    return;
+  }
+  const hash = bcrypt.hashSync(password, 12);
+  const existing = db.prepare('SELECT id FROM admins WHERE email = ?').get(email);
+  if (existing) {
+    db.prepare('UPDATE admins SET password_hash = ?, name = ? WHERE id = ?').run(hash, name, existing.id);
+    console.log('Admin password refreshed from env for', email);
+  } else {
+    // If DB was wiped, recreate the configured admin
+    db.prepare('INSERT INTO admins (email, password_hash, name) VALUES (?, ?, ?)').run(email, hash, name);
+    console.log('Admin created from env:', email);
+  }
+}
+ensureAdminFromEnv();
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Loan Report System running on http://localhost:${PORT}`);
   console.log(`Admin:  http://localhost:${PORT}/admin/`);
